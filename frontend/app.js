@@ -31,6 +31,7 @@ async function boot() {
   renderImages();
   renderFunctions();
   wire();
+  restorePanels();
 
   const first = S.images.find(i => i.name === 'lena_color_256.png') || S.images[0];
   if (first) selectImage(first.name);
@@ -298,13 +299,7 @@ function paint(d) {
   $('stageMsg').className = 'stage-msg';
   $('downloadBtn').disabled = false;
 
-  // Cap the upscale at 2x native. The stage is ~1000px wide, so a 256px test image
-  // was being blown up 4x — it swallowed the page and pushed the histogram and the
-  // step-by-step panel below the fold, which are the whole point. CSS cannot do this
-  // (it does not know the natural size) but the backend just told us: d.shape.w.
-  // 2x rather than 1x because image-rendering:pixelated is deliberate here — seeing
-  // the pixels IS the lesson — and a 256px image at 1:1 is too small to read.
-  $('compare').style.maxWidth = (d.shape.w * 2) + 'px';
+  fitImage(d.shape);
 
   const names = d.applied.map(a => a.name).join(' → ');
   const total = d.applied.reduce((s, a) => s + a.ms, 0);
@@ -498,6 +493,21 @@ function wire() {
   $('helpBtn').onclick = () => $('help').classList.toggle('hidden');
   $('pickBtn').onclick = () => setPicking(!$('compare').classList.contains('picking'));
 
+  document.querySelectorAll('[data-collapse]').forEach(b =>
+    b.onclick = () => setCollapsed(b.dataset.collapse, true));
+  document.querySelectorAll('[data-expand]').forEach(b =>
+    b.onclick = () => setCollapsed(b.dataset.expand, false));
+  $('focusBtn').onclick = toggleFocus;
+
+  document.addEventListener('keydown', (e) => {
+    // don't steal keys from the search boxes or the hue number inputs
+    const t = e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '[') { toggleCollapsed('imagePanel'); e.preventDefault(); }
+    else if (e.key === ']') { toggleCollapsed('fnPanel'); e.preventDefault(); }
+    else if (e.key === '\\') { toggleFocus(); e.preventDefault(); }
+  });
+
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
     ['steps', 'code', 'notes'].forEach(n =>
@@ -591,7 +601,7 @@ function initHandle() {
 
   const sync = () => { img.style.width = wrap.getBoundingClientRect().width + 'px'; };
   img.addEventListener('load', sync);
-  window.addEventListener('resize', sync);
+  window.addEventListener('resize', () => { sync(); fitImage(S.last && S.last.shape); });
 
   // The wipe listens on the whole wrap, not just the handle, so an eyedropper click
   // would start a drag too. Guard by class rather than capture-phase + stopPropagation:
@@ -611,6 +621,67 @@ function initHandle() {
   window.addEventListener('touchmove', e => drag && move(e.touches[0].clientX), { passive: false });
   window.addEventListener('mouseup', () => drag = false);
   window.addEventListener('touchend', () => drag = false);
+}
+
+/* ───────────────────────── image fit ───────────────────────── */
+/* The stage is ~1000px wide, so a 256px test image was rendering at 4x: it swallowed
+   the page and pushed the histogram and the step-by-step panel below the fold, which
+   are the whole point of the tool. CSS cannot fix this — it does not know the natural
+   size — but the backend tells us, in d.shape.
+
+   Cap on HEIGHT, not on a flat upscale multiplier. "Keep the histogram on screen" is
+   the actual goal, and a multiplier only reaches it by accident: a flat 2x capped a
+   256px image at 512px, well under the 1074px stage, so the cap bound instead of the
+   stage and widening the stage (focus mode) changed nothing at all. A height cap
+   scales with the window, uses the room focus mode frees up, and still guarantees
+   ~38vh is left for everything below. The 3x ceiling is only a backstop against
+   absurd blowups of tiny images — image-rendering:pixelated is deliberate here
+   (seeing the pixels IS the lesson), but past ~3x you get bigger blocks, not detail. */
+function fitImage(shape) {
+  if (!shape) return;
+  const byUpscale = shape.w * 3;
+  const byHeight = (shape.w / shape.h) * window.innerHeight * IMG_VH;
+  $('compare').style.maxWidth = Math.round(Math.min(byUpscale, byHeight)) + 'px';
+}
+// Measured, not guessed. At 0.62 the histogram started at y=938 in a 1050px window and
+// was cut off — which defeats the point of capping at all. 0.52 still missed by 5px at
+// 1440x900. 0.50 keeps the image and both histograms fully on screen at 900, 1050 and
+// 1200px tall windows.
+const IMG_VH = 0.50;
+
+/* ───────────────────────── collapsible panels ───────────────────────── */
+const PANELS = { imagePanel: 'c-images', fnPanel: 'c-fns' };
+
+function setCollapsed(id, on) {
+  $(id).classList.toggle('collapsed', on);
+  document.querySelector('main').classList.toggle(PANELS[id], on);
+  try { localStorage.setItem('nara.' + id, on ? '1' : '0'); } catch (e) { /* private mode */ }
+  syncFocusBtn();
+}
+
+const isCollapsed = (id) => $(id).classList.contains('collapsed');
+
+function toggleCollapsed(id) { setCollapsed(id, !isCollapsed(id)); }
+
+function syncFocusBtn() {
+  const both = isCollapsed('imagePanel') && isCollapsed('fnPanel');
+  $('focusBtn').classList.toggle('active', both);
+  $('focusBtn').textContent = both ? 'เลิกโฟกัส' : 'โฟกัส';
+}
+
+function toggleFocus() {
+  const on = !(isCollapsed('imagePanel') && isCollapsed('fnPanel'));
+  setCollapsed('imagePanel', on);
+  setCollapsed('fnPanel', on);
+}
+
+function restorePanels() {
+  for (const id of Object.keys(PANELS)) {
+    let saved = null;
+    try { saved = localStorage.getItem('nara.' + id); } catch (e) { /* private mode */ }
+    if (saved === '1') setCollapsed(id, true);
+  }
+  syncFocusBtn();
 }
 
 /* ───────────────────────── eyedropper ───────────────────────── */

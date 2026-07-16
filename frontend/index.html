@@ -12,6 +12,7 @@
 <header>
   <h1>Nara Images</h1>
   <p class="sub">กดปุ่มใช้ฟังก์ชันจริงที่อาจารย์สอน — COS3401 / COS4301 Digital Image Processing</p>
+  <button id="focusBtn" class="toggle" title="ซ่อนแถบข้างทั้ง 2 ฝั่ง เหลือแต่ภาพ (กด \ )">โฟกัส</button>
   <button id="helpBtn" class="ghost">วิธีใช้</button>
 </header>
 
@@ -25,16 +26,23 @@
     <li>กด <b>+ ต่อฟังก์ชัน</b> เพื่อทำหลายขั้นต่อกัน เช่น <code>Gray → Median → Otsu</code></li>
   </ol>
   <p class="tip">ปุ่มที่มีดาว ★★★★★ คือที่สรุปของคุณบอกว่าออกสอบบ่อยที่สุด — ซ้อมพวกนี้ก่อน</p>
+  <p class="tip keys">อยากเห็นภาพใหญ่ๆ: กด <b>โฟกัส</b> มุมขวาบนเพื่อซ่อนแถบข้างทั้ง 2 ฝั่ง —
+    หรือใช้คีย์ลัด <kbd>[</kbd> ซ่อนแถบรูป · <kbd>]</kbd> ซ่อนแถบฟังก์ชัน · <kbd>\</kbd> ซ่อนทั้งคู่
+    (กดที่แถบบางๆ ด้านข้างเพื่อเปิดกลับ — จำค่าไว้ให้ครั้งหน้าด้วย)</p>
 </div>
 
 <main>
   <!-- ─────────── รูปภาพ ─────────── -->
   <aside id="imagePanel">
+    <button class="rail" data-expand="imagePanel" title="เปิดแถบรูปภาพ (กด [ )">รูปภาพ</button>
     <div class="panel-head">
       <h2 class="rule">รูปภาพ</h2>
-      <label class="upload ghost">
-        อัปโหลด<input type="file" id="uploadInput" accept="image/*" hidden>
-      </label>
+      <div class="head-btns">
+        <label class="upload ghost">
+          อัปโหลด<input type="file" id="uploadInput" accept="image/*" hidden>
+        </label>
+        <button class="collapse" data-collapse="imagePanel" title="ซ่อนแถบรูปภาพ (กด [ )">‹</button>
+      </div>
     </div>
     <input type="search" id="imageSearch" placeholder="ค้นหารูป…">
     <div id="suggested" class="suggested hidden">
@@ -107,7 +115,11 @@
 
   <!-- ─────────── ฟังก์ชัน ─────────── -->
   <aside id="fnPanel">
-    <div class="panel-head"><h2 class="rule">ฟังก์ชัน</h2></div>
+    <button class="rail" data-expand="fnPanel" title="เปิดแถบฟังก์ชัน (กด ] )">ฟังก์ชัน</button>
+    <div class="panel-head">
+      <h2 class="rule">ฟังก์ชัน</h2>
+      <button class="collapse" data-collapse="fnPanel" title="ซ่อนแถบฟังก์ชัน (กด ] )">›</button>
+    </div>
     <input type="search" id="fnSearch" placeholder="ค้นหาฟังก์ชัน…">
     <label class="starfilter"><input type="checkbox" id="starOnly"> เฉพาะ ★★★★★ ที่ออกสอบบ่อย</label>
     <div id="fnList"></div>
