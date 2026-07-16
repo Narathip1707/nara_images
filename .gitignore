@@ -9,8 +9,8 @@ venv/
 images/*
 !images/.gitkeep
 
-# ตั้งค่าเฉพาะเครื่อง
-.claude/settings.local.json
+# ตั้งค่าเฉพาะเครื่อง ไม่ใช่ส่วนหนึ่งของโปรเจกต์
+.claude/
 
 node_modules/
 package-lock.json
