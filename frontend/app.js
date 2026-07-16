@@ -97,7 +97,7 @@ function renderFunctions() {
       (!starOnly || f.stars === 5) &&
       (!q || f.name.toLowerCase().includes(q) || (f.why || '').toLowerCase().includes(q)));
     if (!fns.length) continue;
-    out.push(`<div class="chapter"><h3>${esc(title)}</h3>` + fns.map(f =>
+    out.push(`<div class="chapter"><h3 class="rule">${esc(title)}</h3>` + fns.map(f =>
       `<button class="fn ${isActive(f.id) ? 'sel' : ''}" data-fn="${f.id}" title="${esc(f.why || '')}">
          <span class="nm">${esc(f.name)}</span>
          <span class="st">${'★'.repeat(f.stars)}</span>
@@ -298,6 +298,14 @@ function paint(d) {
   $('stageMsg').className = 'stage-msg';
   $('downloadBtn').disabled = false;
 
+  // Cap the upscale at 2x native. The stage is ~1000px wide, so a 256px test image
+  // was being blown up 4x — it swallowed the page and pushed the histogram and the
+  // step-by-step panel below the fold, which are the whole point. CSS cannot do this
+  // (it does not know the natural size) but the backend just told us: d.shape.w.
+  // 2x rather than 1x because image-rendering:pixelated is deliberate here — seeing
+  // the pixels IS the lesson — and a 256px image at 1:1 is too small to read.
+  $('compare').style.maxWidth = (d.shape.w * 2) + 'px';
+
   const names = d.applied.map(a => a.name).join(' → ');
   const total = d.applied.reduce((s, a) => s + a.ms, 0);
   $('viewerTitle').innerHTML = names
@@ -362,7 +370,7 @@ function renderSteps() {
   pane.innerHTML = why + S.last.steps.map((st, si) => {
     const params = S.ops[si] ? paramsHTML(S.byId[st.fn], S.ops[si], si) : '';
     return `<div class="step-block">
-      <div class="step-title">${si + 1}. ${esc(st.title)}</div>
+      <div class="step-title rule">${si + 1}. ${esc(st.title)}</div>
       ${st.formula ? `<div class="formula">${esc(st.formula)}</div>` : ''}
       ${params}
       ${st.items.map(itemHTML).join('')}
