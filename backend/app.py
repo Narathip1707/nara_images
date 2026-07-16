@@ -7,14 +7,15 @@ import base64
 import os
 import re
 import time
+from urllib.parse import unquote
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, Response, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from dip.common import calc_hist, is_color, to_gray
+from dip.common import calc_hist, imread, imwrite, is_color, to_gray
 from registry import BY_ID, CHAPTERS, public_catalog
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +29,7 @@ os.makedirs(UPLOADS, exist_ok=True)
 app = FastAPI(title="Nara_Images")
 
 MAX_SIDE = 720  # keep the per-pixel loops and the round trip snappy
+MAX_UPLOAD = 25 * 1024 * 1024
 
 
 class Op(BaseModel):
@@ -49,7 +51,7 @@ def _safe_image_path(name):
 
 
 def _read(name):
-    img = cv2.imread(_safe_image_path(name), cv2.IMREAD_UNCHANGED)
+    img = imread(_safe_image_path(name))
     if img is None:
         raise HTTPException(400, f"อ่านรูปไม่ได้: {name}")
     if img.ndim == 3 and img.shape[2] == 4:
@@ -91,7 +93,7 @@ def get_images():
         path = os.path.join(IMAGES, name)
         if not os.path.isfile(path):
             continue
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        img = imread(path)
         if img is None:
             continue
         h, w = img.shape[:2]
@@ -99,7 +101,7 @@ def get_images():
                     "color": img.ndim == 3, "uploaded": False})
     for name in sorted(os.listdir(UPLOADS)):
         path = os.path.join(UPLOADS, name)
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        img = imread(path)
         if img is None:
             continue
         h, w = img.shape[:2]
@@ -111,7 +113,7 @@ def get_images():
 @app.get("/api/thumb/{name:path}")
 def get_thumb(name: str):
     """Always re-encode to PNG — browsers cannot display the .tif test images."""
-    img = cv2.imread(_safe_image_path(name), cv2.IMREAD_UNCHANGED)
+    img = imread(_safe_image_path(name))
     if img is None:
         raise HTTPException(400, f"อ่านรูปไม่ได้: {name}")
     if img.ndim == 3 and img.shape[2] == 4:
@@ -130,12 +132,34 @@ def get_thumb(name: str):
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile):
-    raw = await file.read()
+async def upload(request: Request):
+    """Raw request body, not multipart form-data.
+
+    A multipart UploadFile would drag in python-multipart, and FastAPI raises at
+    route-definition time when it is missing — so one absent package stops the
+    whole app from starting, not just uploads. The body IS the image; the
+    filename rides along in X-Filename.
+    """
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(400, "ไม่ได้รับข้อมูลไฟล์ — ลองใหม่อีกครั้ง")
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(413, "ไฟล์ใหญ่เกิน %d MB" % (MAX_UPLOAD // (1024 * 1024)))
+
     img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
     if img is None:
-        raise HTTPException(400, "ไฟล์นี้ไม่ใช่รูปภาพที่อ่านได้")
-    stem, ext = os.path.splitext(file.filename or "image")
+        raise HTTPException(
+            400,
+            "อ่านไฟล์นี้เป็นรูปภาพไม่ได้ — รองรับ PNG, JPG, BMP, TIFF "
+            "(ไฟล์จากมือถือแบบ HEIC ต้องแปลงเป็น JPG ก่อน)",
+        )
+
+    raw_name = request.headers.get("X-Filename", "")
+    try:
+        raw_name = unquote(raw_name)
+    except Exception:
+        raw_name = ""
+    stem, ext = os.path.splitext(raw_name or "image")
     if ext.lower() not in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
         ext = ".png"
     # keep the user's own filename so the UI shows something recognisable,
@@ -149,7 +173,10 @@ async def upload(file: UploadFile):
         name = "%s_%d%s" % (stem, n, ext)
         n += 1
 
-    cv2.imwrite(os.path.join(UPLOADS, name), img)
+    try:
+        imwrite(os.path.join(UPLOADS, name), img)
+    except OSError as exc:
+        raise HTTPException(500, "บันทึกไฟล์ไม่สำเร็จ: %s" % exc)
     return {"name": "_uploads/" + name}
 
 

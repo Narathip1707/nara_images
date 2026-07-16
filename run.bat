@@ -15,36 +15,60 @@ REM So: probe candidates and take the first one that actually has pip.
 set "PY="
 
 REM 1) the Windows Python Launcher - always finds a real python.org install
-py -3 -m pip --version >nul 2>&1
-if not errorlevel 1 set "PY=py -3"
+call :try py -3
 
-REM 2) plain `python`, but only if pip really works
-if not defined PY (
-    python -m pip --version >nul 2>&1
-    if not errorlevel 1 set "PY=python"
-)
+REM 2) EVERY python/python3 on PATH, not just the first. A shadowing msys2
+REM    python must not make us give up on a real one further down the PATH.
+if not defined PY call :tryall python
+if not defined PY call :tryall python3
 
-REM 3) python3
-if not defined PY (
-    python3 -m pip --version >nul 2>&1
-    if not errorlevel 1 set "PY=python3"
-)
+REM 3) last resort: the usual python.org install locations, even if not on PATH
+if not defined PY call :trydir "%LOCALAPPDATA%\Programs\Python"
+if not defined PY call :trydir "%ProgramFiles%\Python*"
+if not defined PY call :trydir "C:\Python*"
 
 if not defined PY goto nopython
+goto gotpython
 
-for /f "delims=" %%v in ('%PY% -c "import sys;print(sys.executable)" 2^>nul') do set "PYEXE=%%v"
-echo Using Python: %PYEXE%
+:try
+%* -m pip --version >nul 2>&1
+if not errorlevel 1 set "PY=%*"
+goto :eof
+
+:tryall
+for /f "delims=" %%p in ('where %1 2^>nul') do call :probe "%%p"
+goto :eof
+
+:trydir
+for /f "delims=" %%p in ('dir /b /s "%~1\python.exe" 2^>nul') do call :probe "%%p"
+goto :eof
+
+:probe
+if defined PY goto :eof
+%1 -m pip --version >nul 2>&1
+if not errorlevel 1 set "PY=%1"
+goto :eof
+
+:gotpython
+
+echo Using Python: %PY%
 
 REM ------------------------------------------------------------ install deps
-%PY% -c "import fastapi, uvicorn, cv2, numpy" >nul 2>&1
+REM Preflight by importing the app itself rather than a hand-written list of
+REM modules: the list drifts. A missing dep used to let the server "start" and
+REM then fail only on upload, which looked like a broken feature, not a setup
+REM problem.
+cd /d "%~dp0backend"
+
+%PY% -c "import app" >nul 2>&1
 if errorlevel 1 (
     echo Installing dependencies, this may take a minute...
     %PY% -m pip install -q -r "%~dp0requirements.txt"
     if errorlevel 1 goto pipfailed
 )
 
-%PY% -c "import fastapi, uvicorn, cv2, numpy" >nul 2>&1
-if errorlevel 1 goto pipfailed
+%PY% -c "import app" >nul 2>&1
+if errorlevel 1 goto importfailed
 
 REM ------------------------------------------------------------------- images
 if not exist "%~dp0images\*.png" if not exist "%~dp0images\*.jpg" if not exist "%~dp0images\*.tif" (
@@ -59,7 +83,6 @@ echo   Nara Images  -  http://127.0.0.1:8000
 echo   Press Ctrl+C to stop.
 echo.
 
-cd /d "%~dp0backend"
 start "" http://127.0.0.1:8000
 %PY% -m uvicorn app:app --host 127.0.0.1 --port 8000
 goto end
@@ -87,6 +110,16 @@ echo   Try running this by hand to see the real error:
 echo     %PY% -m pip install -r "%~dp0requirements.txt"
 echo.
 echo   If you are behind a proxy or offline, that is usually the cause.
+echo.
+pause
+exit /b 1
+
+:importfailed
+echo.
+echo   ERROR: dependencies installed, but the app still will not import.
+echo   The real error is below:
+echo.
+%PY% -c "import app"
 echo.
 pause
 exit /b 1

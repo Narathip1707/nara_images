@@ -8,6 +8,19 @@ import numpy as np
 from .common import Steps, u8
 
 
+def _samples(r_max, n=6):
+    """Demo rows for the step-by-step table, spread over [0, r_max].
+
+    Must be derived from r_max, never fixed: on a dark image (dark2.png has
+    r_max=50) a hardcoded r=200 makes r/r_max > 1, the result exceeds 255, and
+    np.uint8() raises OverflowError on numpy>=2.
+    """
+    r_max = int(r_max)
+    if r_max <= 0:
+        return [0]
+    return sorted({int(round(r_max * i / (n - 1))) for i in range(n)})
+
+
 def negative(img):
     """s = 255 - r. No parameters."""
     out = 255 - img
@@ -21,6 +34,12 @@ def negative(img):
 def log_transform(img):
     """s = c*ln(1+r) with c = 255/ln(1+r_max). c is derived, not a free parameter."""
     r_max = float(np.amax(img))
+    if r_max <= 0:
+        # all-black: c = 255/ln(1) divides by zero and every output is 0 anyway
+        st = Steps("Log Transformation", "s = c · ln(1 + r)")
+        st.text("ภาพนี้ดำสนิททั้งรูป (r_max = 0) — log transform ไม่มีอะไรให้ดึงขึ้นมา")
+        return img.copy(), st
+
     c = 255.0 / np.log(1.0 + r_max)
     out = c * np.log(1.0 + img.astype(np.float64))
 
@@ -29,9 +48,12 @@ def log_transform(img):
     st.value("r_max = np.amax(img)", round(r_max, 2))
     st.value("c", round(c, 4), "c ถูกคำนวณให้เอง ไม่ใช่ค่าที่ปรับได้ — บังคับให้ค่าสูงสุดออกมาพอดี 255")
     st.text("np.log คือ log ฐาน e (ln) ไม่ใช่ฐาน 10 — จุดที่พลาดกันบ่อยในข้อสอบ")
-    st.table("ตัวอย่างการแมปค่า", ["r", "ln(1+r)", "c·ln(1+r)", "→ uint8"],
+    st.table("ตัวอย่างการแมปค่า", ["r", "ln(1+r)", "c·ln(1+r)", "ปัดเศษ", "→ uint8 (ตัดทิ้ง)"],
              [[r, round(float(np.log(1 + r)), 4), round(float(c * np.log(1 + r)), 3),
-               int(np.uint8(c * np.log(1 + r)))] for r in (0, 10, 50, 100, 200, int(r_max))])
+               int(round(float(c * np.log(1 + r)))),
+               int(np.clip(c * np.log(1 + r), 0, 255))] for r in _samples(r_max)],
+             note="2 คอลัมน์สุดท้ายคือจุดที่สรุปกับโค้ดอาจารย์ไม่ตรงกัน — "
+                  "สรุปคำนวณมือแบบปัดเศษ แต่ .astype(uint8) ตัดทิ้ง")
     lut = c * np.log(1.0 + np.arange(256))
     st.chart("เส้นโค้ง transfer function (r → s)", {"s": np.clip(lut, 0, 255)},
              note="ยกค่าพิกเซลมืดขึ้นมาก บีบค่าพิกเซลสว่างลง → ใช้กับภาพมืด")
@@ -56,10 +78,11 @@ def gamma(img, gamma=0.5):
             "สรุปของคุณเรียกว่า 'หัวใจสำคัญในการสอบ'")
     st.value("γ < 1 → ภาพสว่างขึ้น | γ = 1 → เท่าเดิม | γ > 1 → ภาพมืดลง",
              "สว่างขึ้น" if g < 1 else ("เท่าเดิม" if g == 1 else "มืดลง"))
-    st.table("ตัวอย่างการแมปค่า", ["r", "r/r_max", "(r/r_max)^γ", "255·(...)", "→ uint8"],
+    st.table("ตัวอย่างการแมปค่า",
+             ["r", "r/r_max", "(r/r_max)^γ", "255·(...)", "→ uint8 (ตัดทิ้ง)"],
              [[r, round(r / r_max, 4), round((r / r_max) ** g, 4),
-               round(c * (r / r_max) ** g, 3), int(np.uint8(c * (r / r_max) ** g))]
-              for r in (0, 50, 100, 150, 200, int(r_max))])
+               round(c * (r / r_max) ** g, 3),
+               int(np.clip(c * (r / r_max) ** g, 0, 255))] for r in _samples(r_max)])
     lut = c * np.power(np.arange(256) / 255.0, g)
     st.chart("เส้นโค้ง transfer function (r → s)", {"s": np.clip(lut, 0, 255)})
     return u8(out), st

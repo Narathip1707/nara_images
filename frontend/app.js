@@ -39,11 +39,12 @@ async function boot() {
 
 function noImages() {
   $('compare').classList.remove('on');
-  $('stageMsg').className = 'stage-msg err';
+  $('stageMsg').className = 'stage-msg empty';
   $('stageMsg').innerHTML =
-    'ยังไม่มีรูปทดสอบในโฟลเดอร์ <code>images/</code><br><br>' +
-    'รันไฟล์ <b>get_images.bat</b> เพื่อดึงรูปจากโฟลเดอร์วิชามาใส่ แล้วรีเฟรชหน้านี้<br>' +
-    'หรือลากไฟล์รูปของคุณเองมาวางตรงนี้ได้เลย';
+    '<b>ลากรูปอะไรก็ได้มาวางตรงนี้</b> เพื่อเริ่มใช้งาน<br>' +
+    'หรือกดปุ่ม <b>อัปโหลด</b> มุมซ้ายบน<br><br>' +
+    '<span class="dim">เรียนวิชานี้อยู่และมีโฟลเดอร์วิชาในเครื่อง? ' +
+    'รัน <code>get_images.bat</code> เพื่อดึงรูปทดสอบ 34 รูปมาใส่ให้ครบ</span>';
 }
 
 /* ───────────────────────── images ───────────────────────── */
@@ -495,15 +496,28 @@ function setMode(compare) {
 }
 
 async function upload(file) {
-  const fd = new FormData();
-  fd.append('file', file);
+  if (!file) return;
+  if (!/^image\//.test(file.type) && !/\.(png|jpe?g|bmp|tiff?)$/i.test(file.name))
+    return toast('ไฟล์นี้ไม่ใช่รูปภาพ', true);
+
+  toast('กำลังอัปโหลด ' + file.name + '…');
   try {
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
-    const d = await r.json();
-    if (!r.ok) return toast(d.detail || 'อัปโหลดไม่สำเร็จ', true);
+    // raw body, not FormData -- keeps python-multipart out of the dependency list
+    const r = await fetch('/api/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return toast(d.detail || ('อัปโหลดไม่สำเร็จ (HTTP ' + r.status + ')'), true);
+
     S.images = (await fetch('/api/images').then(x => x.json())).images;
+    $('imageSearch').value = '';
     selectImage(d.name);
-    toast('อัปโหลดแล้ว');
+    toast('อัปโหลด ' + file.name + ' แล้ว');
   } catch (e) { toast('อัปโหลดไม่สำเร็จ: ' + e.message, true); }
 }
 

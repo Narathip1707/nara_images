@@ -4,9 +4,48 @@ Conventions follow the lecture notebooks (`slide Aj`):
   - images are numpy uint8, gray = (rows, cols), color = (rows, cols, 3) in BGR
   - indexing is [y, x] i.e. [row, col]
 """
+import os
+
+import cv2
 import numpy as np
 
 LUMA = (0.2989, 0.5870, 0.1140)  # R, G, B weights taught in Gray_level_image_Processing
+
+
+def imread(path, flags=cv2.IMREAD_UNCHANGED):
+    """cv2.imread that survives non-ASCII paths.
+
+    On Windows cv2.imread cannot open a path containing Thai (or any non-ASCII)
+    characters — it just returns None. A project cloned into e.g.
+    "D:\\work\\โปรแกรมจากเจ๋ง\\nara_images" would fail to load a single image.
+    Reading the bytes with numpy and decoding in memory sidesteps the OpenCV
+    path handling entirely.
+    """
+    try:
+        buf = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    if buf.size == 0:
+        return None
+    return cv2.imdecode(buf, flags)
+
+
+def imwrite(path, img):
+    """cv2.imwrite that survives non-ASCII paths.
+
+    cv2.imwrite returns False (it does not raise) when the path has non-ASCII
+    characters, so a silent failure is easy to miss. Raises on failure instead.
+    """
+    ext = os.path.splitext(path)[1] or ".png"
+    try:
+        ok, buf = cv2.imencode(ext, img)
+    except cv2.error as exc:  # unknown extension raises rather than returning False
+        raise OSError("เข้ารหัสรูปเป็น %s ไม่สำเร็จ: %s" % (ext, exc)) from exc
+    if not ok:
+        raise OSError("เข้ารหัสรูปเป็น %s ไม่สำเร็จ" % ext)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    buf.tofile(path)
+    return True
 
 
 def is_color(img):

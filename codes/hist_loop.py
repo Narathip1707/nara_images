@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 def histogram(img):
@@ -13,6 +12,8 @@ def histogram(img):
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
     img = cv2.imread("./images/cameraman.png", 0)
     hist = histogram(img)
     plt.bar(range(256), hist)

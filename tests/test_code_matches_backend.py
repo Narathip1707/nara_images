@@ -17,6 +17,7 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 
 from dip import colorspace, enhance, filtering, histogram, threshold, transform  # noqa: E402
+from dip.common import imread  # noqa: E402
 
 CODES = os.path.join(ROOT, "codes")
 IMAGES = os.path.join(ROOT, "images")
@@ -34,19 +35,19 @@ def load(name):
 @pytest.fixture(scope="module")
 def gray():
     """Small enough that the nested Python loops stay fast."""
-    img = cv2.imread(os.path.join(IMAGES, "cameraman.png"), 0)
+    img = imread(os.path.join(IMAGES, "cameraman.png"), 0)
     return cv2.resize(img, (96, 96), interpolation=cv2.INTER_AREA)
 
 
 @pytest.fixture(scope="module")
 def salt():
-    img = cv2.imread(os.path.join(IMAGES, "lena_salt_512.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena_salt_512.png"), 0)
     return cv2.resize(img, (96, 96), interpolation=cv2.INTER_NEAREST)
 
 
 @pytest.fixture(scope="module")
 def color():
-    img = cv2.imread(os.path.join(IMAGES, "lena_color_256.png"))
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
     return cv2.resize(img, (64, 64), interpolation=cv2.INTER_AREA)
 
 
@@ -84,6 +85,38 @@ def test_gamma_loop_matches(gray, g):
 def test_log_loop_matches(gray):
     mine, _ = enhance.log_transform(gray)
     same(load("log_loop").log_transform(gray), mine, "log")
+
+
+def test_log_loop_survives_a_255_pixel():
+    """The snippet used to compute 1 + r on uint8: 1 + 255 wraps to 0, log(0) is
+    -inf, and the whole image came out black. cameraman peaks at 245, so the
+    fixture alone never caught it — force a 255 in."""
+    img = np.array([[0, 100, 200, 255], [255, 12, 3, 250]], dtype=np.uint8)
+    out = load("log_loop").log_transform(img)
+    assert out.max() > 0, "log snippet returned an all-black image"
+    mine, _ = enhance.log_transform(img)
+    same(out, mine, "log with a 255 pixel")
+
+
+@pytest.mark.parametrize("peak", [200, 245, 254, 255])
+def test_log_loop_matches_at_every_peak(peak):
+    rng = np.random.default_rng(1)
+    img = rng.integers(0, peak + 1, (24, 24), dtype=np.uint8)
+    img[0, 0] = peak
+    out = load("log_loop").log_transform(img)
+    mine, _ = enhance.log_transform(img)
+    same(out, mine, f"log r_max={peak}")
+
+
+@pytest.mark.parametrize("peak", [50, 85, 200, 255])
+def test_gamma_loop_matches_at_every_peak(peak):
+    rng = np.random.default_rng(2)
+    img = rng.integers(0, peak + 1, (24, 24), dtype=np.uint8)
+    img[0, 0] = peak
+    for g in (0.4, 1.0, 2.2):
+        out = load("gamma_loop").gamma_transform(img, g)
+        mine, _ = enhance.gamma(img, g)
+        same(out, mine, f"gamma {g} r_max={peak}")
 
 
 @pytest.mark.parametrize("bit", range(8))
@@ -151,7 +184,7 @@ def test_split4_loop_matches(gray):
 
 
 def test_local_adaptive_loop_matches():
-    img = cv2.resize(cv2.imread(os.path.join(IMAGES, "gray3.png"), 0), (96, 96),
+    img = cv2.resize(imread(os.path.join(IMAGES, "gray3.png"), 0), (96, 96),
                      interpolation=cv2.INTER_AREA)
     snippet = load("local_adaptive_loop")
     mine, _ = threshold.local_adaptive(img, "otsu")

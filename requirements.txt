@@ -2,5 +2,4 @@ numpy
 opencv-python
 fastapi
 uvicorn
-python-multipart
 pytest

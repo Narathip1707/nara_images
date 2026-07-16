@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from dip import colorspace, enhance, filtering, histogram, threshold  # noqa: E402
-from dip.common import calc_hist  # noqa: E402
+from dip.common import calc_hist, imread  # noqa: E402
 
 IMAGES = os.path.join(os.path.dirname(__file__), "..", "images")
 
@@ -80,7 +80,7 @@ def test_equalization_worked_example_4x4():
 
 def test_equalization_cdf_ends_at_total_pixels():
     """The validity check the summary calls out: the last cdf bin == M*N."""
-    img = cv2.imread(os.path.join(IMAGES, "lena.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena.png"), 0)
     cdf = calc_hist(img).cumsum()
     assert int(cdf[-1]) == img.size
 
@@ -105,7 +105,7 @@ def test_median_kills_salt_mean_does_not():
 
 
 def test_median_matches_opencv():
-    img = cv2.imread(os.path.join(IMAGES, "lena_salt_512.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena_salt_512.png"), 0)
     ours, _ = filtering.median_filter(img, 3)
     theirs = cv2.medianBlur(img, 3)
     assert np.array_equal(ours[1:-1, 1:-1], theirs[1:-1, 1:-1])
@@ -145,7 +145,7 @@ def test_prewitt_and_sobel_worked_example():
 
 
 def test_edge_operator_k1_is_prewitt_k2_is_sobel():
-    img = cv2.imread(os.path.join(IMAGES, "cameraman.png"), 0)
+    img = imread(os.path.join(IMAGES, "cameraman.png"), 0)
     p, sp = filtering.edge_operator(img, 1)
     s, ss = filtering.edge_operator(img, 2)
     assert "Prewitt" in sp.title
@@ -164,7 +164,7 @@ def test_gamma_worked_example():
 
 
 def test_gamma_direction():
-    img = cv2.imread(os.path.join(IMAGES, "lena.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena.png"), 0)
     brighter, _ = enhance.gamma(img, 0.4)
     darker, _ = enhance.gamma(img, 2.5)
     assert brighter.mean() > img.mean()
@@ -212,7 +212,7 @@ def test_bit_plane_worked_example():
 
 
 def test_bit_planes_reconstruct_original():
-    img = cv2.imread(os.path.join(IMAGES, "cameraman.png"), 0)
+    img = imread(os.path.join(IMAGES, "cameraman.png"), 0)
     total = np.zeros_like(img, dtype=np.int64)
     for b in range(8):
         plane, _ = enhance.bit_plane(img, b)
@@ -222,7 +222,7 @@ def test_bit_planes_reconstruct_original():
 
 # --------------------------------------------------------------- ch.2 Negative
 def test_negative_is_its_own_inverse():
-    img = cv2.imread(os.path.join(IMAGES, "lena.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena.png"), 0)
     once, _ = enhance.negative(img)
     twice, _ = enhance.negative(once)
     assert np.array_equal(twice, img)
@@ -243,7 +243,7 @@ def test_luma_weights_sum_to_0_9999_not_1():
 
 
 def test_gray_close_to_opencv():
-    img = cv2.imread(os.path.join(IMAGES, "lena_color_256.png"))
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
     ours, _ = colorspace.to_gray(img)
     theirs = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     assert np.abs(ours.astype(int) - theirs.astype(int)).max() <= 2
@@ -302,7 +302,7 @@ class TestSummaryRoundsButCodeTruncates:
 
 
 def test_cmyk_round_trip_is_lossless():
-    img = cv2.imread(os.path.join(IMAGES, "lena_color_256.png"))
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
     back, _ = colorspace.cmyk2rgb(img)
     assert np.abs(back.astype(int) - img.astype(int)).max() <= 1
 
@@ -334,14 +334,14 @@ def test_hsv_opencv_ranges():
 
 # -------------------------------------------------- ch.6 real images / split4
 def test_otsu_close_to_opencv_on_real_image():
-    img = cv2.imread(os.path.join(IMAGES, "cells.tif"), 0)
+    img = imread(os.path.join(IMAGES, "cells.tif"), 0)
     ours, _ = threshold.otsu_value(calc_hist(img))
     theirs, _ = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     assert abs(ours - int(theirs)) <= 2
 
 
 def test_split4_covers_every_pixel():
-    img = cv2.imread(os.path.join(IMAGES, "shade.png"), 0)
+    img = imread(os.path.join(IMAGES, "shade.png"), 0)
     parts = threshold.split4(img)
     assert sum(p.size for p in parts) == img.size
     merged = threshold.merge_local(parts, np.zeros_like(img))
@@ -357,7 +357,7 @@ def test_split4_handles_odd_dimensions():
 
 def test_local_adaptive_beats_global_on_shaded_image():
     """shade.png has a gradient across it -- the per-quadrant T values must differ."""
-    img = cv2.imread(os.path.join(IMAGES, "shade.png"), 0)
+    img = imread(os.path.join(IMAGES, "shade.png"), 0)
     thrs = [threshold.otsu_value(calc_hist(p))[0] for p in threshold.split4(img)]
     assert max(thrs) - min(thrs) > 5, f"quadrant T values barely differ: {thrs}"
 
@@ -371,7 +371,7 @@ def test_binarize_boundary_is_inclusive():
 
 # ------------------------------------------------------------- ch.3 histogram
 def test_equalization_flattens_cdf():
-    img = cv2.imread(os.path.join(IMAGES, "lena.png"), 0)
+    img = imread(os.path.join(IMAGES, "lena.png"), 0)
     out, _ = histogram.equalization(img)
     assert out.std() >= img.std()
     assert int(out.max()) == 255
