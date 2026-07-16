@@ -12,6 +12,9 @@ images/*
 # ตั้งค่าเฉพาะเครื่อง ไม่ใช่ส่วนหนึ่งของโปรเจกต์
 .claude/
 
+# template ของคนอื่นที่เอาไว้ดูเป็นตัวอย่างดีไซน์ ไม่เผยแพร่ซ้ำ
+Example/
+
 node_modules/
 package-lock.json
 .DS_Store
