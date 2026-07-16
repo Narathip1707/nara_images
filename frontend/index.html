@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nara Images — ทบทวน Digital Image Processing</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230f1216'/><rect x='3' y='3' width='5' height='5' fill='%234da3ff'/><rect x='8' y='8' width='5' height='5' fill='%234da3ff'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Nara Images</h1>
+  <p class="sub">กดปุ่มใช้ฟังก์ชันจริงที่อาจารย์สอน — COS3401 / COS4301 Digital Image Processing</p>
+  <button id="helpBtn" class="ghost">วิธีใช้</button>
+</header>
+
+<div id="help" class="help hidden">
+  <h3>ใช้ยังไง</h3>
+  <ol>
+    <li><b>เลือกรูป</b> จากแถบซ้าย (หรือลากไฟล์ของตัวเองมาวาง)</li>
+    <li><b>กดฟังก์ชัน</b> ที่อยากลอง แล้วปรับสไลเดอร์ดูผลทันที</li>
+    <li>ดู <b>histogram</b> ข้างล่างว่าเปลี่ยนไปยังไง ลากเส้นแบ่งกลางภาพเพื่อเทียบก่อน/หลัง</li>
+    <li>เปิดแท็บ <b>คำนวณทีละขั้น</b> เพื่อดูตัวเลขทุกขั้น และ <b>โค้ด</b> เพื่อดูคำตอบข้อสอบ</li>
+    <li>กด <b>+ ต่อฟังก์ชัน</b> เพื่อทำหลายขั้นต่อกัน เช่น <code>Gray → Median → Otsu</code></li>
+  </ol>
+  <p class="tip">ปุ่มที่มีดาว ★★★★★ คือที่สรุปของคุณบอกว่าออกสอบบ่อยที่สุด — ซ้อมพวกนี้ก่อน</p>
+</div>
+
+<main>
+  <!-- ─────────── รูปภาพ ─────────── -->
+  <aside id="imagePanel">
+    <div class="panel-head">
+      <h2>รูปภาพ</h2>
+      <label class="upload ghost">
+        อัปโหลด<input type="file" id="uploadInput" accept="image/*" hidden>
+      </label>
+    </div>
+    <input type="search" id="imageSearch" placeholder="ค้นหารูป…">
+    <div id="suggested" class="suggested hidden">
+      <h3>แนะนำสำหรับฟังก์ชันนี้</h3>
+      <div id="suggestedList" class="thumbs"></div>
+    </div>
+    <h3 id="allImagesLabel">รูปทั้งหมด</h3>
+    <div id="imageList" class="thumbs"></div>
+  </aside>
+
+  <!-- ─────────── ผลลัพธ์ ─────────── -->
+  <section id="stage">
+    <div id="pipeline" class="pipeline"></div>
+
+    <div id="viewer" class="viewer">
+      <div class="viewer-head">
+        <div id="viewerTitle" class="viewer-title">เลือกรูปแล้วกดฟังก์ชันเพื่อเริ่ม</div>
+        <div class="viewer-tools">
+          <button id="modeCompare" class="toggle active" title="ลากเส้นกลางเพื่อเทียบ">เทียบก่อน/หลัง</button>
+          <button id="modeAfter" class="toggle">ดูผลลัพธ์อย่างเดียว</button>
+          <button id="downloadBtn" class="ghost" disabled>บันทึกรูป</button>
+        </div>
+      </div>
+
+      <!-- "หลัง" is the base layer; "ก่อน" is clipped on top from the left, so the
+           handle wipes the original away to reveal the result. -->
+      <div id="compare" class="compare">
+        <img id="imgAfter" alt="ภาพหลังประมวลผล">
+        <div id="beforeWrap" class="before-wrap"><img id="imgBefore" alt="ภาพก่อนประมวลผล"></div>
+        <div id="handle" class="handle"><span></span></div>
+        <div class="corner-label left">ก่อน</div>
+        <div class="corner-label right">หลัง</div>
+      </div>
+      <div id="stageMsg" class="stage-msg"></div>
+    </div>
+
+    <div class="hist-row">
+      <div class="hist-box">
+        <h4>Histogram — ก่อน</h4>
+        <canvas id="histBefore" width="480" height="150"></canvas>
+      </div>
+      <div class="hist-box">
+        <h4>Histogram — หลัง</h4>
+        <canvas id="histAfter" width="480" height="150"></canvas>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="steps">คำนวณทีละขั้น</button>
+      <button class="tab" data-tab="code">โค้ดตอบข้อสอบ</button>
+      <button class="tab" data-tab="notes">ข้อควรระวัง</button>
+    </div>
+
+    <div id="tab-steps" class="tabpane"></div>
+
+    <div id="tab-code" class="tabpane hidden">
+      <div class="code-head">
+        <div class="code-variants">
+          <button class="cvar active" data-variant="loop">แบบสอบ (for-loop)</button>
+          <button class="cvar" data-variant="cv2">cv2 สำเร็จรูป</button>
+        </div>
+        <button id="copyCode" class="ghost">คัดลอก</button>
+      </div>
+      <pre id="codeBody"><code>เลือกฟังก์ชันก่อน</code></pre>
+    </div>
+
+    <div id="tab-notes" class="tabpane hidden"></div>
+  </section>
+
+  <!-- ─────────── ฟังก์ชัน ─────────── -->
+  <aside id="fnPanel">
+    <div class="panel-head"><h2>ฟังก์ชัน</h2></div>
+    <input type="search" id="fnSearch" placeholder="ค้นหาฟังก์ชัน…">
+    <label class="starfilter"><input type="checkbox" id="starOnly"> เฉพาะ ★★★★★ ที่ออกสอบบ่อย</label>
+    <div id="fnList"></div>
+  </aside>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
