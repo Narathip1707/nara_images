@@ -13,8 +13,13 @@ if not exist "%COURSE%\images" (
     echo   Course folder not found:
     echo     %COURSE%
     echo.
-    echo   Edit the COURSE variable in this file to match your machine,
-    echo   or just copy any images into images\ yourself.
+    echo   This script only helps if you have the COS3401 course folder on
+    echo   this machine. You do NOT need it to use the app:
+    echo.
+    echo     - Just run run.bat and drag any image onto the web page.
+    echo     - Or copy any images you like into the images\ folder.
+    echo     - Or, if you do have the course folder somewhere else,
+    echo       edit the COURSE variable at the top of this file.
     echo.
     pause
     exit /b 1

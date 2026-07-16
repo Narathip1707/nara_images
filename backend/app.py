@@ -5,6 +5,7 @@ or just double-click run.bat in the project root.
 """
 import base64
 import os
+import re
 import time
 
 import cv2
@@ -134,10 +135,20 @@ async def upload(file: UploadFile):
     img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
     if img is None:
         raise HTTPException(400, "ไฟล์นี้ไม่ใช่รูปภาพที่อ่านได้")
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
+    stem, ext = os.path.splitext(file.filename or "image")
+    if ext.lower() not in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
         ext = ".png"
-    name = "%d%s" % (int(time.time() * 1000), ext)
+    # keep the user's own filename so the UI shows something recognisable,
+    # but strip anything that could escape UPLOADS or confuse the path
+    stem = re.sub(r"[^A-Za-z0-9ก-๙_.-]", "_", stem).strip("._") or "image"
+    stem = stem[:60]
+
+    name = stem + ext
+    n = 1
+    while os.path.exists(os.path.join(UPLOADS, name)):
+        name = "%s_%d%s" % (stem, n, ext)
+        n += 1
+
     cv2.imwrite(os.path.join(UPLOADS, name), img)
     return {"name": "_uploads/" + name}
 
