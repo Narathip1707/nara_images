@@ -317,6 +317,37 @@ table.mx { border-collapse: collapse; margin: 4px 0; }
 }
 .pmini { border-top: 1px dashed var(--line); margin-top: 6px; padding-top: 6px; }
 
+/* ─────────── hue bands (param type "bands") ─────────── */
+.bands { display: flex; flex-direction: column; gap: 4px; }
+.bands .dim { color: var(--dim); font-size: 12px; margin: 2px 0; }
+.band { display: flex; align-items: center; gap: 4px; }
+.band .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); flex: none; }
+.band input[type=number] {
+  width: 100%; min-width: 0; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px;
+  font-family: Consolas, monospace; font-size: 12.5px;
+}
+.band input[type=number]:focus { outline: none; border-color: var(--accent); }
+.band .dash, .band .deg { color: var(--dim); font-size: 12px; flex: none; }
+.band .wrap-tag { color: var(--accent); font-size: 12px; flex: none; cursor: help; }
+.band .x, .bands .x {
+  background: none; border: none; color: var(--dim); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 3px; flex: none;
+}
+.band .x:hover { color: #ff6b6b; }
+.band-add { display: flex; gap: 4px; margin-top: 2px; }
+.band-add .badd { flex: none; padding: 3px 7px; font-size: 12px; }
+.band-add .bpreset {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--dim);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; font-size: 12px;
+}
+
+/* ─────────── eyedropper mode ─────────── */
+#compare.picking { cursor: crosshair; }
+/* the handle would swallow the click that is meant for the pixel underneath it */
+#compare.picking .handle { pointer-events: none; }
+#pickBtn.active { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+
 /* ─────────── toast ─────────── */
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);

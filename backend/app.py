@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from dip.colorspace import rgb2hsv_full
 from dip.common import calc_hist, imread, imwrite, is_color, to_gray
 from registry import BY_ID, CHAPTERS, public_catalog
 
@@ -40,6 +41,14 @@ class Op(BaseModel):
 class ApplyRequest(BaseModel):
     image: str
     ops: list[Op] = []
+
+
+class PickRequest(BaseModel):
+    image: str
+    ops: list[Op] = []  # the pipeline PREFIX — everything before the op being edited
+    x: int
+    y: int
+    width: int = 20  # half-width of the suggested band, in degrees
 
 
 def _safe_image_path(name):
@@ -195,14 +204,11 @@ def get_code(fn_id: str):
     return {"code": out}
 
 
-@app.post("/api/apply")
-def apply(req: ApplyRequest):
-    img = _read(req.image)
-    original = img.copy()
-    hist_before = _hist_payload(img)
-
+def _apply_ops(img, ops):
+    """Run a pipeline. Shared by /api/apply and /api/pick so the gray-coercion and
+    param-whitelist rules cannot fork between the two."""
     steps, applied = [], []
-    for op in req.ops:
+    for op in ops:
         spec = BY_ID.get(op.fn)
         if not spec:
             raise HTTPException(404, f"ไม่รู้จักฟังก์ชัน: {op.fn}")
@@ -237,6 +243,54 @@ def apply(req: ApplyRequest):
             d = step.to_dict()
             d["fn"] = op.fn
             steps.append(d)
+    return img, steps, applied
+
+
+def _pick_at(img, x, y, width=20):
+    """Report the colour at one pixel, plus a hue band centred on it.
+
+    `weak` matters more than it looks: on a photo shot against black, clicking the
+    background or a blown-out highlight gives delta = 0 -> H = 0, and the honest
+    answer is "this pixel has no hue", not "you picked red". Without the flag the
+    eyedropper would silently write a red band and look broken.
+    """
+    y = int(max(0, min(img.shape[0] - 1, y)))
+    x = int(max(0, min(img.shape[1] - 1, x)))
+    h, s, v = rgb2hsv_full(img[y:y + 1, x:x + 1])
+    hh, ss, vv = float(h[0, 0]), float(s[0, 0]), float(v[0, 0])
+    b, g, r = (int(c) for c in img[y, x])
+    return {
+        "x": x, "y": y, "rgb": [r, g, b],
+        "h": round(hh, 1), "s": round(ss, 3), "v": round(vv, 3),
+        "band": [round((hh - width) % 360.0, 1), round((hh + width) % 360.0, 1)],
+        "weak": bool(ss < 0.25 or vv < 0.15),
+    }
+
+
+@app.post("/api/pick")
+def pick(req: PickRequest):
+    """Eyedropper. Samples the INPUT of the op being edited (ops = the pipeline
+    prefix), not the final result — otherwise widening a band would sample the
+    image a previous color_select had already blacked out.
+
+    Deliberately server-side rather than a canvas readback in JS: doing it in the
+    browser would mean a fourth copy of rgb2hsv (backend / _loop.py / _cv2.py / JS)
+    that no test can reach, since test_code_matches_backend.py cannot load JS. It
+    would drift at exactly the band edges where hue_mask already proved two
+    implementations disagree.
+    """
+    img, _steps, _applied = _apply_ops(_read(req.image), req.ops)
+    if not is_color(img):
+        raise HTTPException(400, "ดูดสีได้เฉพาะภาพสี — ภาพตอนนี้เป็นภาพเทาแล้ว")
+    return _pick_at(img, req.x, req.y, req.width)
+
+
+@app.post("/api/apply")
+def apply(req: ApplyRequest):
+    img = _read(req.image)
+    original = img.copy()
+    hist_before = _hist_payload(img)
+    img, steps, applied = _apply_ops(img, req.ops)
 
     return {
         "before": _png_b64(original),

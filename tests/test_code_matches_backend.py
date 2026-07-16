@@ -65,6 +65,48 @@ def test_gray_loop_matches(color):
     same(load("gray_loop").to_gray(color), mine, "gray")
 
 
+def test_hsv_loop_matches(color):
+    """Guards the rgb2hsv_full extract: colorspace.rgb2hsv only ever returns one
+    plane, so nothing else can catch a regression in the other two."""
+    h, s, v = load("hsv_loop").rgb2hsv(color)
+    bh, bs, bv = colorspace.rgb2hsv_full(color)
+    for name, a, b in (("h", h, bh), ("s", s, bs), ("v", v, bv)):
+        assert np.array_equal(a, b), f"hsv plane {name}: loop and backend disagree"
+
+
+@pytest.mark.parametrize("low,high", [(0, 40), (20, 60), (60, 170), (170, 260), (0, 360)])
+def test_hue_mask_loop_matches(color, low, high):
+    """This was RED: the backend used cv2.cvtColor(BGR2HSV) while the snippet
+    computed hue by hand, and cv2 rounds H to an int then halves it — so it only
+    yields even degrees and disagreed on 91/4096 pixels at (0,40). The backend
+    moved to the snippet, not the other way round: the snippet is the exam answer."""
+    mine, _ = colorspace.hue_mask(color, low, high)
+    same(load("hue_mask_loop").hue_mask(color, low, high), mine, f"hue_mask {low}-{high}")
+
+
+@pytest.mark.parametrize("bands", [[[20, 60]], [[340, 20]], [[200, 260], [20, 60]], [[0, 360]]])
+@pytest.mark.parametrize("drop", ["gray", "black", "white"])
+def test_color_select_loop_matches(color, bands, drop):
+    mine, _ = colorspace.color_select(color, bands=bands, drop=drop)
+    got = load("color_select_loop").color_select(color, [tuple(b) for b in bands], drop=drop)
+    same(got, mine, f"color_select {bands} drop={drop}")
+
+
+@pytest.mark.parametrize("sf,vf,hs", [(1.0, 1.0, 0.0), (0.2, 1.0, 0.0), (40.0, 1.3, 0.0),
+                                      (1.0, 1.0, 90.0), (2.5, 0.5, -30.0)])
+def test_color_adjust_loop_matches(color, sf, vf, hs):
+    mine, _ = colorspace.color_adjust(color, bands=[[20, 60]], s_factor=sf, v_factor=vf,
+                                      h_shift=hs)
+    got = load("color_adjust_loop").color_adjust(color, [(20, 60)], s_factor=sf, v_factor=vf,
+                                                 h_shift=hs)
+    same(got, mine, f"color_adjust s={sf} v={vf} h={hs}")
+
+
+def test_hsv2bgr_loop_matches(color):
+    h, s, v = colorspace.rgb2hsv_full(color)
+    same(load("hsv2bgr_loop").hsv2bgr(h, s, v), colorspace.bgr_from_hsv(h, s, v), "hsv2bgr")
+
+
 def test_transpose_loop_matches(gray):
     mine, _ = transform.transpose(gray)
     same(load("transpose_loop").transpose(gray), mine, "transpose")

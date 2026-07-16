@@ -12,6 +12,13 @@ Fields
   why      when to reach for this technique — the exam's "problem -> technique" table
   notes    badges: ("warn"|"info", text) — slide bugs and exam traps
   code     {loop, cv2} basenames in codes/
+  pickable optional; True lets the eyedropper write a hue into this function's params
+
+Param types: "int" | "float" | "odd_int" (sliders) | "choice" (needs `options`)
+             | "bands" (list of [low, high] hue pairs; needs `presets`, `max_bands`)
+Adding a type means adding a branch to paramsHTML AND bindParams in frontend/app.js —
+an unknown type falls through to <input type=range min="undefined">, a slider that is
+silently broken rather than an error.
 """
 from dip import colorspace, enhance, filtering, histogram, threshold, transform
 
@@ -45,6 +52,24 @@ GTE_NOTE = (
     "เว็บนี้ยึด >= ตาม slide Aj และตรงกับสรุปของคุณที่เขียนว่า 'r ≥ T' — "
     "ต่างกันแค่พิกเซลที่เท่ากับ T พอดี แต่ในข้อสอบคำนวณมือมีผล",
 )
+
+# Shared by color_select and color_adjust. The default is your final exam answer:
+# blue 200-260 + orange 20-60, both selected at once.
+BANDS_PARAM = {
+    "key": "bands", "type": "bands", "default": [[200, 260], [20, 60]],
+    "label": "ช่วง Hue ที่เลือก (°)", "max_bands": 6,
+    "presets": [["red", "แดง", 340, 20], ["orange", "ส้ม/เหลือง", 20, 60],
+                ["green", "เขียว", 60, 170], ["cyan", "ฟ้า", 170, 200],
+                ["blue", "น้ำเงิน", 200, 260], ["purple", "ม่วง/ชมพู", 260, 340]],
+}
+S_MIN_PARAM = {
+    "key": "s_min", "type": "float", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.25,
+    "label": "S ต่ำสุด (กันสีซีด/เทา)",
+}
+V_MIN_PARAM = {
+    "key": "v_min", "type": "float", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.15,
+    "label": "V ต่ำสุด (กันพื้นหลังดำ/นอยส์)",
+}
 
 FUNCTIONS = [
     # ------------------------------------------------------------------ ch.1
@@ -122,8 +147,8 @@ FUNCTIONS = [
         "code": "hsv",
     },
     {
-        "id": "hue_mask", "name": "Hue Mask (แยกวัตถุตามสี)", "chapter": 1, "stars": 3,
-        "fn": colorspace.hue_mask, "input": "color",
+        "id": "hue_mask", "name": "Hue Mask (แยกวัตถุตามสี) — ฉบับสไลด์", "chapter": 1, "stars": 3,
+        "fn": colorspace.hue_mask, "input": "color", "pickable": True,
         "params": [
             {"key": "low", "type": "int", "min": 0, "max": 360, "step": 5, "default": 20,
              "label": "Hue ต่ำสุด (°)"},
@@ -131,10 +156,93 @@ FUNCTIONS = [
              "label": "Hue สูงสุด (°)"},
         ],
         "formula": "mask = (H ≥ low) & (H ≤ high)",
-        "why": "แยกวัตถุตามสี — แบบเดียวกับที่คุณทำในไฟนอลข้อ 2 (จับสีฟ้ากับสีส้ม)",
+        "why": "แยกวัตถุตามสี ตามสไลด์ HSV_ColorSpace_new cell 12 เป๊ะๆ — นี่คือคำตอบข้อสอบ "
+               "ถ้าโจทย์สั่ง 'จงเขียนโปรแกรมแยกวัตถุตามสี'",
         "good_for": ["test_color.png", "RGB_test.png", "mandril_color.png"],
-        "notes": [("warn", "cv2 เก็บ H เป็น [0,179] ต้องคูณ 2 กลับก่อนเทียบกับองศาจริง")],
+        "notes": [
+            ("warn", "กับดัก 1 — ไม่มีตัวกรอง S/V: พิกเซลดำ/เทา/ขาวมี Δ=0 → H=0 → ถูกนับเป็น "
+                     "'สีแดง' ทั้งหมด ลองกับ lena.png ที่ low=0 high=40 จะเก็บพิกเซลไว้ 45% "
+                     "ขณะที่ Color Select ที่กรอง S/V แล้วเก็บ 40% — ส่วนต่างคือพิกเซลซีดที่ไม่ใช่สีแดงจริง"),
+            ("warn", "กับดัก 2 — เลือกสีแดงไม่ได้: แดงคร่อม 0° (340–360 ∪ 0–20) แต่สูตรเป็นช่วงเดียว "
+                     "ตั้ง low=340 high=20 จะได้ภาพดำสนิท"),
+            ("info", "ทั้ง 2 ข้อแก้แล้วใน 'Color Select' — แต่ตัวนี้เก็บไว้ตามสไลด์เพื่อใช้ตอบข้อสอบ "
+                     "อย่าไปแก้"),
+            ("info", "อาจารย์ไม่เคยใช้ cv2.cvtColor(BGR2HSV) เลยสักที่ในสไลด์หรือ week1–11 — "
+                     "คำนวณ H เองด้วยสูตรมือ (องศา 0–360) ตลอด ส่วนทางลัด cv2 เก็บ H เป็น [0,179] "
+                     "(ปัดเป็นจำนวนเต็มแล้วหาร 2) จึงเทียบได้แค่องศาคู่ และไม่ตรงกับสูตรมือที่ขอบช่วง"),
+            LOOP_NOTE,
+        ],
         "code": "hue_mask",
+    },
+    {
+        "id": "color_select", "name": "Color Select (เลือกสี — ที่เหลือดรอป)", "chapter": 1,
+        "stars": 3, "fn": colorspace.color_select, "input": "color", "pickable": True,
+        "params": [
+            BANDS_PARAM,
+            {"key": "drop", "type": "choice", "default": "gray", "label": "สีที่ไม่ได้เลือก → ",
+             "options": [["gray", "เทา (color pop)"], ["black", "ดำ (แบบสไลด์อาจารย์)"],
+                         ["white", "ขาว"], ["keep", "ดู mask อย่างเดียว"]]},
+            S_MIN_PARAM, V_MIN_PARAM,
+        ],
+        "formula": "mask = (H≥low)&(H≤high) หรือ (H≥low)|(H≤high) ถ้าวนผ่าน 0°  AND  S≥s_min & V≥v_min",
+        "why": "เลือกสีที่ต้องการแล้วดรอปสีอื่น — ฉบับที่แก้กับดักของสไลด์แล้ว: "
+               "เลือกสีแดงได้ เลือกหลายสีพร้อมกันได้ และพื้นหลังดำไม่ติดมา",
+        "good_for": ["test_color.png", "RGB_test.png", "lena_color_256.png"],
+        "notes": [
+            ("info", "ค่าเริ่มต้นคือฟ้า 200–260 + ส้ม 20–60 = ไฟนอลข้อ 2 ของคุณเป๊ะๆ "
+                     "(masks = [(h>180)&(h<260), (h>20)&(h<60)])"),
+            ("warn", "ต้องมีทั้ง S floor และ V floor เพราะกันคนละอย่าง — วัดจริงกับนอยส์เกือบดำ: "
+                     "13% ตกในช่วงสีส้ม และมี S เฉลี่ยถึง 0.69 (เพราะ S = Δ/Cmax ระเบิดเมื่อ Cmax เล็ก) "
+                     "S floor กรองออกได้แค่ 6% แต่ V floor กรองออก 100% "
+                     "กลับกัน พิกเซลเทา 128 มี V=0.5 (V กรองไม่ได้) แต่ S=0 (S กรองได้)"),
+            GTE_NOTE, LOOP_NOTE,
+        ],
+        "code": "color_select",
+    },
+    {
+        "id": "color_adjust", "name": "Color Adjust (ปรับเฉพาะสีที่เลือก)", "chapter": 1,
+        "stars": 3, "fn": colorspace.color_adjust, "input": "color", "pickable": True,
+        "params": [
+            BANDS_PARAM,
+            {"key": "s_factor", "type": "float", "min": 0.0, "max": 5.0, "step": 0.1,
+             "default": 1.0, "label": "S × (ความสด)"},
+            {"key": "v_factor", "type": "float", "min": 0.0, "max": 3.0, "step": 0.1,
+             "default": 1.0, "label": "V × (ความสว่าง)"},
+            {"key": "h_shift", "type": "float", "min": -180.0, "max": 180.0, "step": 5.0,
+             "default": 0.0, "label": "H เลื่อน (°)"},
+            S_MIN_PARAM, V_MIN_PARAM,
+        ],
+        "formula": "s[mask] = clip(s×s_factor, 0, 1),  v[mask] = clip(v×v_factor, 0, 1),  "
+                   "h[mask] = (h + h_shift) mod 360  →  HSV→BGR",
+        "why": "เลือกสีแล้วปรับต่อ — ทำให้กลุ่มสีเดียวสดขึ้น/ซีดลง/สว่างขึ้น หรือเปลี่ยนเป็นสีอื่นไปเลย "
+               "คือ saturation_adjust + value_adjust ในไฟนอลข้อ 2 ของคุณ",
+        "good_for": ["lena_color_256.png", "test_color.png", "RGB_test.png"],
+        "notes": [
+            ("info", "ไฟนอลข้อ 2 ของคุณ: s_factor=0.2 กับสีฟ้า, s_factor=40.0 + v_factor=1.3 "
+                     "กับสีส้ม (ค่า 40 ก็แค่ดันให้ชน clip ที่ 1.0 — 5 กับ 40 ให้ผลเหมือนกัน)"),
+            ("warn", "ตรงนี้ที่เดียวในแอปที่ 'ปัดเศษ' (np.rint) แทนที่จะตัดทิ้ง เพราะฟังก์ชันนี้ต่อ "
+                     "pipeline ได้ ถ้าตัดทิ้ง s_factor=1, v_factor=1 จะไม่ใช่ identity — "
+                     "ทุกพิกเซลลด 1 แล้วภาพจะมืดลงทุกครั้งที่กด"),
+            LOOP_NOTE,
+        ],
+        "code": "color_adjust",
+    },
+    {
+        "id": "hsv2bgr", "name": "HSV → BGR (แปลงกลับ)", "chapter": 1, "stars": 2,
+        "fn": colorspace.hsv2bgr, "input": "color", "params": [],
+        "formula": "C = V·S,  X = C(1 − |(H/60) mod 2 − 1|),  m = V − C  →  (R,G,B) = (R'+m, G'+m, B'+m)·255",
+        "why": "พิสูจน์ว่าสูตรไป-กลับถูกต้อง (ควรได้ภาพเดิมเป๊ะ) — และจำเป็นถ้าจะปรับ S/V "
+               "แล้วแสดงผลเป็นภาพสี",
+        "good_for": ["lena_color_256.png", "test_color.png"],
+        "notes": [
+            ("info", "อาจารย์ไม่ได้สอนทางกลับ — สไลด์แปลง RGB→HSV แล้วจบ ไม่เคยแปลงกลับ "
+                     "ตัวนี้จึงมาจากโค้ดไฟนอลของคุณเอง (image_tool.py)"),
+            ("warn", "cv2.cvtColor(hsv.astype('float32'), COLOR_HSV2BGR) เพี้ยนจากสูตรมือ ±1 บน "
+                     "~27% ของพิกเซล และ for-loop เขียนตามให้ตรงเป๊ะไม่ได้เลย (cv2 ใช้ตาราง sector "
+                     "กับ cvRound ภายในของมันเอง) แอปนี้เลยคำนวณเองเพื่อให้โค้ดที่โชว์ = โค้ดที่รัน "
+                     "ผลพลอยได้: สูตรมือแปลงไป-กลับได้ค่าเดิมเป๊ะทุกสี ส่วน cv2 เพี้ยน 1"),
+        ],
+        "code": "hsv2bgr",
     },
 
     # ------------------------------------------------------------------ ch.2

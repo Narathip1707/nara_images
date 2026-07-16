@@ -127,3 +127,42 @@ def test_all_gray_functions_survive_a_flat_white_image():
         assert out is not None, f"{spec['id']} คืน None บนภาพขาวล้วน"
         if step is not None:
             step.to_dict()
+
+
+@pytest.mark.parametrize("fill", [0, 128, 255])
+def test_all_colour_functions_survive_a_flat_image(fill):
+    """The two tests above skip input=="color", so the colour path had never been
+    run against a flat black image — the exact case that started this feature (a
+    photo on a black background). Every one of these is degenerate for HSV:
+    delta = 0 everywhere so H is 0, and at fill=0 Cmax = 0 so s = delta/Cmax is 0/0.
+    """
+    img = np.full((32, 32, 3), fill, np.uint8)
+    for spec in FUNCTIONS:
+        if spec.get("input") != "color":
+            continue
+        params = {p["key"]: p["default"] for p in spec.get("params", [])}
+        out, step = spec["fn"](img, **params)
+        assert out is not None, f"{spec['id']} คืน None บนภาพสีล้วน {fill}"
+        assert out.dtype == np.uint8, f"{spec['id']} คืน dtype {out.dtype}"
+        if step is not None:
+            step.to_dict()
+
+
+def test_pick_reports_hue_and_flags_weak_pixels():
+    """requirements.txt has no httpx, so fastapi.testclient will not import — and
+    adding a dependency to an offline app for one test is how the python-multipart
+    breakage happened. Test the helper directly instead."""
+    import app
+
+    img = np.zeros((4, 4, 3), np.uint8)
+    img[0, 0] = (153, 51, 204)  # BGR -> the summary's RGB(204,51,153), H=320
+    hit = app._pick_at(img, 0, 0, 20)
+    assert hit["h"] == pytest.approx(320.0, abs=0.1)
+    assert hit["rgb"] == [204, 51, 153]
+    assert hit["band"] == [300.0, 340.0]
+    assert hit["weak"] is False
+    # the black background: H=0 is meaningless, and saying "you picked red" is worse
+    # than saying nothing
+    assert app._pick_at(img, 3, 3, 20)["weak"] is True
+    # a click past the edge must clamp, not raise
+    assert app._pick_at(img, 999, -5, 20)["x"] == 3

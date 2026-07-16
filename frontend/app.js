@@ -114,7 +114,12 @@ const activeSpec = () => S.ops[S.activeIdx] ? S.byId[S.ops[S.activeIdx].fn] : nu
 
 function defaults(spec) {
   const p = {};
-  (spec.params || []).forEach(x => p[x.key] = x.default);
+  // Deep-copy object defaults. A `bands` default is an array, and a reference copy
+  // would make this op's params THE SAME array as the registry's default — and as
+  // every other op built from the same spec. One in-place edit would corrupt all of
+  // them at once.
+  (spec.params || []).forEach(x => p[x.key] =
+    (x.default && typeof x.default === 'object') ? structuredClone(x.default) : x.default);
   return p;
 }
 
@@ -135,6 +140,7 @@ function afterOpsChange() {
   renderSuggested();
   renderNotes();
   loadCode();
+  syncPickBtn();
   run();
 }
 
@@ -183,6 +189,28 @@ function paramsHTML(spec, op, idx) {
           `<option value="${esc(String(val))}" ${String(val) === String(v) ? 'selected' : ''}>${esc(lb)}</option>`
         ).join('')}</select></div>`;
     }
+    if (p.type === 'bands') {
+      const bands = Array.isArray(v) ? v : [];
+      return `<div class="param"><label>${esc(p.label)}</label>
+        <div class="bands" data-i="${idx}" data-k="${p.key}">
+          ${bands.map(([lo, hi], bi) => `<div class="band" data-b="${bi}">
+            <i class="sw" style="background:hsl(${lo},90%,50%)"></i>
+            <input type="number" class="bl" min="0" max="360" step="1" value="${lo}">
+            <span class="dash">–</span>
+            <input type="number" class="bh" min="0" max="360" step="1" value="${hi}">
+            <span class="deg">°</span>
+            ${lo > hi ? '<span class="wrap-tag" title="ช่วงนี้วนผ่าน 0° (สีแดง)">↻</span>' : ''}
+            <button class="x" data-bdel="${bi}" title="ลบช่วงนี้">×</button></div>`).join('') ||
+            '<p class="dim">ยังไม่ได้เลือกสี — กดปุ่มดูดสีแล้วคลิกบนภาพ หรือเพิ่มช่วงด้านล่าง</p>'}
+          <div class="band-add">
+            <button class="ghost badd" ${bands.length >= (p.max_bands || 6) ? 'disabled' : ''}>+ เพิ่มช่วง</button>
+            <select class="bpreset"><option value="">เพิ่มสีสำเร็จรูป…</option>
+              ${(p.presets || []).map(([, lb, lo, hi]) =>
+                `<option value="${lo},${hi}">${esc(lb)} (${lo}–${hi}°)</option>`).join('')}
+            </select>
+          </div>
+        </div></div>`;
+    }
     const step = p.step ?? (p.type === 'float' ? 0.1 : 1);
     return `<div class="param">
       <label><span>${esc(p.label)}</span><b data-out="${idx}-${p.key}">${v}</b></label>
@@ -205,13 +233,32 @@ function bindParams(root) {
     r.oninput = () => commit(true);
     r.onchange = () => commit(false);
   });
-  root.querySelectorAll('select').forEach(s => s.onchange = () => {
+  root.querySelectorAll('select[data-k]').forEach(s => s.onchange = () => {
     const raw = s.value;
     const n = Number(raw);
     S.ops[+s.dataset.i].params[s.dataset.k] = (raw !== '' && !isNaN(n)) ? n : raw;
     run();
   });
+  root.querySelectorAll('.bands').forEach(el => {
+    const i = +el.dataset.i, k = el.dataset.k;
+    // Always assign a NEW array — never push/splice in place. run() -> paint() ->
+    // renderSteps() -> paramsHTML re-reads S.ops[i].params, so this is all the
+    // re-render plumbing needed.
+    const set = (v) => { S.ops[i].params[k] = v; run(); };
+    const readRows = () => [...el.querySelectorAll('.band')].map(b => [
+      clampDeg(b.querySelector('.bl').value), clampDeg(b.querySelector('.bh').value)]);
+    el.querySelectorAll('input[type=number]').forEach(n => n.onchange = () => set(readRows()));
+    el.querySelectorAll('[data-bdel]').forEach(b => b.onclick = () =>
+      set((S.ops[i].params[k] || []).filter((_, j) => j !== +b.dataset.bdel)));
+    el.querySelector('.badd').onclick = () => set([...(S.ops[i].params[k] || []), [0, 40]]);
+    el.querySelector('.bpreset').onchange = (e) => {
+      if (!e.target.value) return;
+      set([...(S.ops[i].params[k] || []), e.target.value.split(',').map(Number)]);
+    };
+  });
 }
+
+const clampDeg = (v) => Math.min(360, Math.max(0, Math.round(Number(v) || 0)));
 
 /* ───────────────────────── run ───────────────────────── */
 async function run() {
@@ -441,6 +488,7 @@ function wire() {
   $('fnSearch').oninput = renderFunctions;
   $('starOnly').onchange = renderFunctions;
   $('helpBtn').onclick = () => $('help').classList.toggle('hidden');
+  $('pickBtn').onclick = () => setPicking(!$('compare').classList.contains('picking'));
 
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
@@ -537,14 +585,79 @@ function initHandle() {
   img.addEventListener('load', sync);
   window.addEventListener('resize', sync);
 
-  const down = (e) => { drag = true; move(e.clientX ?? e.touches[0].clientX); e.preventDefault(); };
+  // The wipe listens on the whole wrap, not just the handle, so an eyedropper click
+  // would start a drag too. Guard by class rather than capture-phase + stopPropagation:
+  // both listeners sit on `wrap` itself, and at-target listeners fire in registration
+  // order regardless of the capture flag — so ordering would decide the winner.
+  const down = (e) => {
+    if (wrap.classList.contains('picking')) return;
+    drag = true; move(e.clientX ?? e.touches[0].clientX); e.preventDefault();
+  };
   handle.addEventListener('mousedown', down);
   wrap.addEventListener('mousedown', down);
+  wrap.addEventListener('click', (e) => {
+    if (wrap.classList.contains('picking')) pickAt(e.clientX, e.clientY);
+  });
   handle.addEventListener('touchstart', down, { passive: false });
   window.addEventListener('mousemove', e => drag && move(e.clientX));
   window.addEventListener('touchmove', e => drag && move(e.touches[0].clientX), { passive: false });
   window.addEventListener('mouseup', () => drag = false);
   window.addEventListener('touchend', () => drag = false);
+}
+
+/* ───────────────────────── eyedropper ───────────────────────── */
+function syncPickBtn() {
+  const spec = activeSpec();
+  const on = !!(spec && spec.pickable);
+  $('pickBtn').hidden = !on;
+  if (!on) setPicking(false);
+}
+
+function setPicking(on) {
+  $('compare').classList.toggle('picking', on);
+  $('pickBtn').classList.toggle('active', on);
+  if (on) toast('คลิกบนภาพตรงสีที่ต้องการ — คลิกซ้ำได้เรื่อยๆ เพื่อเลือกหลายสี');
+}
+
+async function pickAt(clientX, clientY) {
+  const i = S.activeIdx, spec = activeSpec();
+  if (!spec || !spec.pickable || !S.image) return;
+
+  // The displayed image is an unrotated, aspect-preserved scale of the backend's
+  // working array (_read downsizes to MAX_SIDE, _png_b64 encodes that same array),
+  // so naturalWidth IS the backend's width — the mapping is 1:1, no scale factor.
+  const img = $('imgAfter'), r = img.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const x = Math.floor((clientX - r.left) / r.width * img.naturalWidth);
+  const y = Math.floor((clientY - r.top) / r.height * img.naturalHeight);
+
+  try {
+    const res = await fetch('/api/pick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // ops = the pipeline PREFIX: sample what this op actually sees, not the final
+      // result (which a previous color_select may have already blacked out).
+      body: JSON.stringify({ image: S.image, ops: S.ops.slice(0, i), x, y, width: 20 }),
+    });
+    const d = await res.json();
+    if (!res.ok) { toast(d.detail || 'ดูดสีไม่สำเร็จ', true); return; }
+    if (d.weak) {
+      toast(`พิกเซลนี้ S=${d.s} V=${d.v} ต่ำเกินไป (สีเทา/ดำ) — Hue ไม่มีความหมาย ` +
+            'ลองคลิกที่สีสดๆ', true);
+      return;
+    }
+    const p = (spec.params || []).find(q => q.type === 'bands');
+    if (p) {
+      const cur = S.ops[i].params[p.key] || [];
+      if (cur.length >= (p.max_bands || 6)) { toast('เลือกได้สูงสุด ' + (p.max_bands || 6) + ' ช่วง', true); return; }
+      S.ops[i].params[p.key] = [...cur, d.band];   // append, so clicking blue then orange builds both
+    } else {
+      S.ops[i].params.low = d.band[0];
+      S.ops[i].params.high = d.band[1];
+    }
+    toast(`ดูดสี RGB(${d.rgb.join(', ')}) → H=${d.h}° → เลือกช่วง ${d.band[0]}–${d.band[1]}°`);
+    run();
+  } catch (e) { toast('ดูดสีไม่สำเร็จ: ' + e.message, true); }
 }
 
 let toastTimer;

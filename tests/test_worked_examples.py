@@ -375,3 +375,178 @@ def test_equalization_flattens_cdf():
     out, _ = histogram.equalization(img)
     assert out.std() >= img.std()
     assert int(out.max()) == 255
+
+
+# ------------------------------------------------- ch.1 HSV & colour selection
+def test_rgb2hsv_full_worked_example():
+    """summary 01 §8.2: RGB(204,51,153) -> H=320, S=0.75, V=0.8.
+
+    Deliberately a case that needs the +360 branch (Cmax=R and G<B), which is the
+    one the summary walks through by hand.
+    """
+    img = np.array([[[153, 51, 204]]], np.uint8)  # BGR
+    h, s, v = colorspace.rgb2hsv_full(img)
+    assert float(h[0, 0]) == pytest.approx(320.0, abs=1e-9)
+    assert float(s[0, 0]) == pytest.approx(0.75, abs=1e-9)
+    assert float(v[0, 0]) == pytest.approx(0.8, abs=1e-9)
+    # the summary also gives the OpenCV 8-bit packing of the same pixel
+    assert [int(x) for x in cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[0, 0]] == [160, 191, 204]
+
+
+def test_hsv_round_trip_is_exactly_lossless():
+    """array_equal, not a tolerance. cmyk2rgb only manages <=1; this one is exact,
+    which is why bgr_from_hsv rounds instead of truncating."""
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
+    assert np.array_equal(colorspace.bgr_from_hsv(*colorspace.rgb2hsv_full(img)), img)
+
+
+def test_hsv_round_trip_lossless_on_a_colour_cube():
+    """Exhaustive over 393216 colours, including the ends where rounding could bite."""
+    g, b = np.meshgrid(np.arange(256), np.arange(256), indexing="ij")
+    for r in (0, 1, 127, 128, 254, 255):
+        img = np.dstack([b, g, np.full_like(g, r)]).astype(np.uint8)
+        out = colorspace.bgr_from_hsv(*colorspace.rgb2hsv_full(img))
+        assert np.array_equal(out, img), f"round trip lost data at R={r}"
+
+
+def test_our_hsv2bgr_differs_from_cv2_by_at_most_1():
+    """Pins the KNOWN divergence from your own final-exam hsv2bgr.
+
+    cv2's float32 HSV2BGR uses its own sector table and cvRound, lands +-1 away on
+    ~27% of pixels, and CANNOT be reproduced by a for-loop in any dtype or rounding
+    mode. That is why the backend is hand-written: if cv2 were the engine, the
+    loop == backend invariant this whole repo rests on would be permanently red.
+    """
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
+    h, s, v = colorspace.rgb2hsv_full(img)
+    theirs = (cv2.cvtColor(np.stack([h, s, v], 2).astype("float32"),
+                           cv2.COLOR_HSV2BGR) * 255).astype("uint8")
+    ours = colorspace.bgr_from_hsv(h, s, v)
+    assert np.abs(ours.astype(int) - theirs.astype(int)).max() <= 1
+    assert not np.array_equal(ours, theirs), "cv2 suddenly agrees — re-check the note"
+
+
+def test_round_half_to_even_is_consistent_between_vec_and_loop():
+    """np.rint and Python round() are both half-to-even; threshold.float2int is
+    half-UP. Mixing them inside the HSV inverse would break vec == loop at .5."""
+    assert np.rint(0.5) == 0 and round(0.5) == 0
+    assert np.rint(1.5) == 2 and round(1.5) == 2
+    assert threshold.float2int(0.5) == 1  # do NOT reach for this in bgr_from_hsv
+
+
+def test_wrap_around_red_band():
+    """(h>=low)&(h<=high) cannot express red, which straddles 0 deg; (h>=340)|(h<=20) can."""
+    img = np.array([[[0, 0, 255], [255, 0, 0], [0, 255, 0]]], np.uint8)  # red, blue, green
+    out, _ = colorspace.color_select(img, bands=[[340, 20]], drop="black")
+    assert list(out[0, 0]) == [0, 0, 255], "red should be kept"
+    assert list(out[0, 1]) == [0, 0, 0], "blue should be dropped"
+    assert list(out[0, 2]) == [0, 0, 0], "green should be dropped"
+
+
+def test_full_circle_band_selects_everything():
+    """low=0 high=360 must not collapse to (h>=0)&(h<=0) under a naive %360 —
+    'select every colour' silently becoming 'select pure red only'."""
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
+    out, _ = colorspace.color_select(img, bands=[[0, 360]], s_min=0.0, v_min=0.0, drop="black")
+    assert np.array_equal(out, img)
+
+
+def test_v_gate_not_s_gate_is_what_saves_the_black_background():
+    """MEASURED: 13% of near-black noise lands in the orange band with mean S=0.69,
+    because S = delta/Cmax explodes when Cmax is tiny — RGB(3,9,1) reads as 'fully
+    saturated green'. The S floor barely dents it; the V floor is load-bearing.
+    This is the case that started the whole feature (a rainbow photo on black)."""
+    rng = np.random.default_rng(3)
+    bg = rng.integers(0, 14, (200, 200, 3)).astype(np.uint8)
+    h, s, v = colorspace.rgb2hsv_full(bg)
+    band = (h >= 20) & (h <= 60)
+    assert band.mean() > 0.10, "the noise really does land in the band"
+    assert s[band].mean() > 0.5, "and it really does look saturated"
+    assert (band & (s >= 0.25)).mean() > 0.09, "S floor barely helps"
+    assert (band & (v >= 0.15)).sum() == 0, "V floor kills it outright"
+
+
+def test_gray_pixel_is_not_selected_as_red():
+    """delta=0 -> H=0, so every gray pixel claims to be pure red. The S floor catches
+    it; the V floor cannot (gray 128 has V=0.5)."""
+    img = np.full((4, 4, 3), 128, np.uint8)
+    out, _ = colorspace.color_select(img, bands=[[340, 20]], drop="black")
+    assert out.max() == 0, "gray must not be selected as red"
+    out, _ = colorspace.color_select(img, bands=[[340, 20]], s_min=0.0, v_min=0.0, drop="black")
+    assert np.array_equal(out, img), "gates off -> the bug is back, by definition"
+
+
+def test_hue_mask_keeps_the_professors_trap_on_purpose():
+    """hue_mask IS slide Aj HSV_ColorSpace_new cell 12. It has no S/V gate, so a gray
+    image comes back as 'red'. That is deliberate teaching content and the exam
+    answer — do NOT 'fix' it here; color_select is the fixed version."""
+    img = np.full((4, 4, 3), 128, np.uint8)
+    out, _ = colorspace.hue_mask(img, 0, 40)
+    assert np.array_equal(out, img), "hue_mask must stay the professor's version"
+    # and its single interval cannot express red at all
+    red = np.array([[[0, 0, 255]]], np.uint8)
+    out, _ = colorspace.hue_mask(red, 340, 20)
+    assert out.max() == 0, "low>high gives an empty mask — the trap"
+
+
+def test_color_adjust_identity():
+    """factor=1 is an exact no-op only because bgr_from_hsv rounds. With truncation
+    every pixel would drop 1 per pass and the image would darken on every apply."""
+    img = imread(os.path.join(IMAGES, "lena_color_256.png"))
+    out = img
+    for _ in range(5):  # chainable: five passes must still be the identity
+        out, _ = colorspace.color_adjust(out, bands=[[0, 360]], s_min=0.0, v_min=0.0,
+                                         s_factor=1.0, v_factor=1.0, h_shift=0.0)
+    assert np.array_equal(out, img)
+
+
+def test_his_final_answer_blue_and_orange_together():
+    """Final_test/6601001123_Q2: masks = [(h>180)&(h<260), (h>20)&(h<60)] — two
+    colours kept at once. That pair is also color_select's registry default."""
+    img = np.array([[[255, 0, 0], [0, 128, 255], [0, 255, 0]]], np.uint8)  # blue, orange, green
+    out, _ = colorspace.color_select(img, bands=[[180, 260], [20, 60]], drop="black")
+    assert out[0, 0].any(), "blue kept"
+    assert out[0, 1].any(), "orange kept"
+    assert not out[0, 2].any(), "green dropped"
+
+
+def test_color_select_rejects_malformed_bands():
+    """/api/apply does no type checking, so a bad `bands` would reach numpy and
+    surface as an opaque 500. Fail with a readable Thai message instead."""
+    img = np.full((4, 4, 3), 128, np.uint8)
+    for bad in ([], [[20]], [["a", "b"]], [20, 60]):
+        with pytest.raises(ValueError):
+            colorspace.color_select(img, bands=bad)
+
+
+def test_the_sv_gate_is_visible_with_drop_white_but_not_drop_gray():
+    """Where the gate actually shows up, measured rather than assumed.
+
+    Selecting red on a photo shot against black is the worst case: black pixels have
+    delta=0 -> H=0, so they join the red band and survive. But whether you SEE that
+    depends on `drop`:
+      - drop="white": the survivors stay black against a white field -> obvious speckle
+      - drop="gray":  invisible, because a kept near-black pixel and a grayed near-black
+                      pixel are both black. The damage only surfaces later, when
+                      color_adjust with v_factor > 1 amplifies the noise it kept.
+    Written down because the obvious demo ("drag v_min to 0 and watch it explode")
+    does NOT reproduce on drop="gray", and a lesson that doesn't reproduce is worse
+    than no lesson.
+    """
+    rng = np.random.default_rng(11)
+    img = np.zeros((120, 120, 3), np.uint8)
+    img[:] = rng.integers(0, 14, (120, 120, 3))       # near-black noise background
+    img[40:80, 40:80] = (0, 0, 220)                    # a red patch
+
+    def corner(drop, gated):
+        out, _ = colorspace.color_select(
+            img, bands=[[340, 20]], drop=drop,
+            s_min=0.25 if gated else 0.0, v_min=0.15 if gated else 0.0)
+        return out[0:30, 0:30].mean()
+
+    # drop=white: the gate is the difference between a clean field and a speckled one
+    assert corner("white", True) > 250, "gated -> background is cleanly white"
+    assert corner("white", False) < 240, "ungated -> black noise survives as speckle"
+
+    # drop=gray: both are black. No visible difference, by construction.
+    assert abs(corner("gray", True) - corner("gray", False)) < 8
